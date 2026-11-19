@@ -136,12 +136,16 @@ Setiap pilihan di bawah ditulis dalam tiga bagian: **alasan memilih**, **kelemah
 
 **Kelemahan pilihan kita:** HR dan NDCG hanya mengukur akurasi. Keragaman (diversity), kebaruan (novelty), dan apakah item ekor ikut direkomendasikan tidak terukur.
 
-### 2.6 Fokus User-Based (Item-Based versi kecil)
-**Alasan:** User-Based cukup melatih model **sekali**, jadi murah dan bisa memakai semua user test.
+### 2.6 User-Based dan Item-Based
+**User-Based** cukup melatih model **sekali**, jadi murah. Dijalankan untuk ItemKNN dan EASE^R.
 
-**Kelemahan Item-Based (kenapa hanya versi kecil):** harus melatih ulang model untuk setiap item × setiap N. Dengan 1000 item × 16 nilai N seperti paper, itu 16.000 kali latih ulang per model. Kita pakai 50 item, maksimal 3 langkah successive evaluation, dan 500 user test.
+**Kelemahan Item-Based:** harus melatih ulang model untuk setiap item × setiap N. Dengan 1000 item × 16 nilai N seperti paper, itu 16.000 kali latih ulang per model. Latih ulang biasa butuh berjam-jam.
 
-**Kelemahan versi kecil kita:** dengan hanya 50 item, rata-rata HR\*/NDCG\* lebih **noisy** dan confidence interval-nya lebih lebar daripada di paper. Threshold item yang kita temukan mungkin meleset dari Table 2.
+**Solusi kita:** untuk ItemKNN tanpa pruning, "latih ulang" dihitung eksak dengan hanya menghitung ulang satu kolom similarity (lihat §7). Dengan begitu Item-Based dijalankan pada **skala paper**: 1000 item, semua user test, semua langkah successive evaluation.
+
+**Kelemahan solusi ini:** trik tersebut hanya berlaku untuk ItemKNN. Item-Based untuk EASE^R tidak kita jalankan.
+
+> Catatan: versi awal memakai 50 item dan 1.500 titik evaluasi. Hasilnya 0 semua, karena nilai HR\* di paper sangat kecil (±10⁻⁴–10⁻⁶) dan tidak terdeteksi oleh evaluasi sekecil itu. Karena itu kita pindah ke skala penuh.
 
 ---
 
@@ -263,20 +267,22 @@ Notebook 01 adalah **versi mini** dari semua langkah di atas: 6 user × 6 film. 
 | Bagian notebook | Apa yang terjadi | Konsep di dokumen ini | Paper |
 |---|---|---|---|
 | **1. Input** | 22 interaksi (user, film A–F, waktu) | §4 cara membaca data, matriks X | Sec 4.1.1 |
-| **2. Preprocessing** | GT = 28.9 → U5, U6 jadi user test; ground truth U5 = C, U6 = F | §4 split global timepoint | Sec 4.1.2 |
-| **3. ItemKNN** | co-occurrence G = XᵀX → cosine similarity, mis. sim(A,B) = 3/(√4·√4) = 0.75 | §2 kenapa ItemKNN | Sec 4.1.4 |
-| **4. Output rekomendasi** | U5 [A,B,D] → skor C = 1.732, E = 1.155 → rekomendasi **[C, E]** ✅ | output yang diminta tugas | – |
-| **5. User-Based** | riwayat dipotong N = 1, 2, 3 → NDCG@2 = 0.315 → 0.5 → 0.5 | §1 eksperimen User-Based | Sec 3.2 |
-| **6. Deteksi threshold** | slope window [1,2] = 0.185 (tercuram) → **threshold = 2** | §1 sliding window | Sec 4.2 |
-| **7. Item-Based** | interaksi item B dibatasi N = 1, 2, 3 + latih ulang → HR\*@2 = 0 → 0.333 → 1 | §1 eksperimen Item-Based | Sec 3.1, Eq. 1–2 |
+| **2. Preprocessing** | GT = 28.9 → U5, U6 jadi user test; ground truth U5 = C, U6 = D | §4 split global timepoint | Sec 4.1.2 |
+| **3. ItemKNN** | co-occurrence G = XᵀX → cosine similarity, mis. sim(A,B) = 4/(√4·√5) = 0.894 | §2 kenapa ItemKNN | Sec 4.1.4 |
+| **4. Output rekomendasi** | U5 [A,B,D] → skor C = 1.685, F = 1.078, E = 0.724 → rekomendasi **[C, F]** ✅ | output yang diminta tugas | – |
+| **5. User-Based** | riwayat dipotong N = 1, 2, 3; film di riwayat **lengkap** dibuang dari kandidat → HR@2 = 0.5 → 1 → 1, NDCG@2 = 0.315 → 0.815 → 1 | §1 eksperimen User-Based | Sec 3.2 |
+| **6. Deteksi threshold** | slope window [1,2] = 0.5 (tercuram), window [2,3] = 0.185 → **threshold = 2** | §1 sliding window | Sec 4.2 |
+| **7. Item-Based** | interaksi item B dibatasi N = 1, 2, 3 + latih ulang → HR\*@2 = 0 → 0.333 → 1, NDCG\*@2 = 0 → 0.333 → 0.877 | §1 eksperimen Item-Based | Sec 3.1, Eq. 1–2 |
 
 ### Penjelasan singkat tiap langkah notebook
 
 **Langkah 3: ItemKNN.** Idenya: *"film yang sering ditonton orang yang sama itu mirip"*.
-- `G[A][B] = 3` artinya ada 3 user yang menonton A **dan** B.
+- `G[A][B] = 4` artinya ada 4 user yang menonton A **dan** B (U1, U2, U5, U6).
 - Angka itu dibagi dengan popularitas masing-masing film (cosine), supaya film yang sangat populer tidak otomatis "mirip dengan semua film".
 
 **Langkah 4: Rekomendasi.** Skor setiap film = jumlah kemiripannya dengan semua film di riwayat user. Film yang sudah ditonton dibuang, lalu ambil K film dengan skor tertinggi.
+
+Di langkah 5 (User-Based), yang dibuang adalah film di riwayat **lengkap** user, bukan hanya N film yang diberikan ke model. Alasannya: user memang sudah menonton film itu, jadi menebaknya tidak berguna. Ini sama dengan notebook 02 dan merupakan **asumsi** kita (lihat §7).
 
 **Langkah 5: Metrik.** Ada dua metrik:
 - **HR@K (Hit Rate):** apakah jawaban benar ada di top-K? (1 = ya, 0 = tidak)
@@ -286,7 +292,11 @@ Notebook 01 adalah **versi mini** dari semua langkah di atas: 6 user × 6 film. 
   - peringkat 3 → 0.5
   - tidak masuk top-K → 0
 
-Di notebook, U5 dengan 1 film saja ([D]) gagal. Dengan 2 film ([A, B]), film C langsung muncul di peringkat 1. Itulah **transisi cold → warm**.
+Di notebook (seed 0):
+- U5 dengan 1 film saja ([D]) mendapat [F, E] → **gagal**. Dengan 2 film ([A, B]), film C langsung muncul di peringkat 1.
+- U6 dengan 1 film ([F]) mendapat [E, D] → D di peringkat 2 (NDCG 0.631). Dengan 3 film ([A, F, B]), D naik ke peringkat 1.
+
+Rata-ratanya NDCG@2 = 0.315 → 0.815 → 1.0. Lonjakan terbesar terjadi dari N = 1 ke N = 2: itulah **transisi cold → warm**.
 
 **Langkah 6: Sliding window.**
 1. Ambil beberapa titik berurutan di grafik (window).
@@ -330,7 +340,98 @@ Notebook 02 menjalankan **langkah yang persis sama** dengan fungsi yang sama dar
 
 ---
 
-## 7. Asumsi & penyederhanaan (perlu disebut saat presentasi)
-- **Lebar sliding window** (2 titik di notebook 01, 3 titik di notebook 02) dan aturan "threshold = N terakhir di window" adalah **pilihan kita**. Paper tidak menyebutkan keduanya, dan repo kode penulis tidak bisa diakses.
-- **Item-Based**: 50 item (paper 1000), maksimal 3 langkah successive evaluation, maksimal 500 user test. Tujuannya supaya bisa berjalan di laptop.
+## 7. Apa yang diketahui dan tidak diketahui dari paper
+
+### Metodenya diketahui, yang hilang sebagian detail implementasi
+Paper menjelaskan **kerangka metodenya** dengan jelas, jadi metode bisa kita jalankan dengan setia. Yang tidak ada adalah sebagian **detail implementasi**. Paper menulis bahwa kodenya ada di `github.com/dalibra/recommendation-dish-better-served-warm`, tapi saat dicek (November 2026) link itu **404 (tidak ditemukan)** dan pencarian di GitHub juga tidak menemukannya. Kemungkinan repo-nya privat, dihapus, atau berganti nama. Akibatnya detail yang tidak tertulis di paper tidak bisa kita cek.
+
+### Yang dijelaskan jelas di paper (dan kita ikuti)
+- Split global timepoint di kuantil 0.9. Train dan validasi dibagi acak per user.
+- **User-Based:** riwayat di-sample N secara uniform, diurutkan waktu, model tidak dilatih ulang, ground truth = interaksi pertama setelah GT.
+- **Item-Based:** sisakan N interaksi acak, latih ulang, user test dikeluarkan dari train, item yang diteliti dibuang dari test & validasi, lalu successive evaluation. S = 1000 item.
+- Rumus metrik HR, NDCG, HR\*, NDCG\* (Eq. 1–4), K = 1, 5, 10, 50, 100.
+- Deteksi threshold dengan sliding window regresi linear, memilih slope positif tercuram.
+- Dataset (ML-1M, dll.) dan model (EASE^R, PureSVD, ItemKNN, SASRec-CE).
+
+### Yang TIDAK disebutkan di paper (dan cara kita mengisinya)
+| Detail | Pengaruhnya | Pilihan kita |
+|---|---|---|
+| **Varian ItemKNN**: rumus similarity, jumlah tetangga, pembobotan | **Paling besar.** ItemKNN kita (cosine, skor = jumlah similarity) sangat bias ke film populer, sehingga film dengan sedikit interaksi hampir tidak pernah direkomendasikan. ItemKNN di paper jelas berperilaku lain. | Cosine + shrinkage, jumlah tetangga dipilih lewat validasi. Untuk Item-Based dipakai tanpa pruning. |
+| **Filter seen**: film yang sudah ditonton dibuang berdasarkan riwayat yang **dipotong** atau riwayat **lengkap**? | Besar. Di ML-1M, HR@10 ItemKNN kita ±0.025 kalau hanya membuang riwayat terpotong, dan ±0.055 kalau membuang riwayat lengkap. Nilai paper ±0.05–0.06. | Riwayat **lengkap**, karena hasilnya mendekati paper dan sistem nyata memang tahu apa yang sudah ditonton user. |
+| **Lebar sliding window** dan titik mana di window yang dijadikan threshold | Threshold bisa bergeser beberapa angka. | 3 titik (2 di notebook 01), threshold = N terakhir di window. |
+| Grid hyperparameter, nilai N persisnya, cara menangani skor seri | Kecil. | Grid kecil penuh. N = 1, 2, …, 8, 10, 12, 16, 20, 24, 32, 48, 64 (mengikuti sumbu grafik paper). Skor seri dihitung pesimis. |
+
+### Artinya untuk proyek kita
+- **Kerangka metode dijalankan setia**, jadi tugas "implementasikan proposed method" tetap terpenuhi.
+- **Angka di Table 2 belum tentu bisa didapat persis**, karena sebagian hasil bergantung pada detail yang tidak dipublikasikan. Ini wajar di riset. Malah selaras dengan pesan paper: threshold bergantung pada dataset **dan model**. Di sini terlihat bahwa threshold bahkan bergantung pada **implementasi** model yang sama-sama bernama "ItemKNN".
+- Saat presentasi, sampaikan dengan jujur. Contoh kalimat:
+  > *"Kerangka metode kami mengikuti paper. Beberapa detail implementasi tidak tersedia karena repo kode penulis tidak bisa diakses, jadi kami memakai asumsi X, Y, Z. Hasil User-Based mendekati paper, sedangkan Item-Based berbeda karena …"*
+
+  Penjelasan seperti ini justru menunjukkan kita memahami metodenya, bukan sekadar menyalin angka.
+
+### Penyederhanaan lain
 - **Notebook 01** hanya ilustrasi perhitungan dan tidak memakai set validasi. Hasil yang dibandingkan dengan paper ada di notebook 02.
+- **Notebook 02** hanya memakai ML-1M dan dua model (ItemKNN, EASE^R), bukan 4 dataset × 4 model.
+- **Tuning** memakai grid kecil penuh, bukan 20 titik acak seperti paper.
+- **"Latih ulang" di Item-Based** dihitung dengan cara cepat: untuk ItemKNN tanpa pruning, cukup kolom similarity item yang diteliti yang dihitung ulang. Kesetaraannya dengan latih ulang penuh sudah diuji (HR\* identik, selisih NDCG\* ≤ 0.0005). Dengan cara ini setup Item-Based bisa memakai skala paper: 1000 item, semua user test, semua langkah.
+
+---
+
+## 8. Hasil eksperimen ML-1M (notebook 02)
+
+### Setup yang dijalankan
+- Data: ML-1M lengkap. Statistiknya sama persis dengan Table 1 paper: 6.040 user, 3.706 film, 1.000.209 interaksi.
+- Split: GT = **29 Desember 2000**. Hasilnya 836.101 interaksi train, 483 user validasi, **1.180 user test**.
+- Hyperparameter hasil tuning di set validasi: ItemKNN `k = 400, shrink = 50`, EASE^R `λ = 200`.
+- Contoh output: seorang user test yang terakhir menonton *Wayne's World 2*, *You've Got Mail*, *Austin Powers*, dll. mendapat rekomendasi *Groundhog Day*, *Forrest Gump*, *Star Wars: Episode V*, … Ground truth-nya *The Englishman Who Went Up a Hill…*, yang tidak masuk top-10. Rekomendasinya didominasi film populer, sebuah tanda awal bias popularitas.
+
+### 8.1 User-Based: cocok dengan paper ✅
+| Model | Threshold kita (HR / NDCG) | Paper (Table 2) |
+|---|---|---|
+| ItemKNN | **4 / 4** | 4 ± 1.4 |
+| EASE^R | **4 / 5** | 5 ± 1.1 |
+
+Nilai HR@10 ItemKNN untuk beberapa N (rata-rata 5× sampling, ± = 95% CI):
+
+| N | 1 | 2 | 4 | 8 | 16 | 32 | 64 |
+|---|---|---|---|---|---|---|---|
+| HR@10 | 0.032 ± .005 | 0.040 ± .006 | **0.049** ± .008 | 0.050 ± .009 | 0.059 ± .011 | 0.057 ± .012 | 0.056 ± .013 |
+| NDCG@10 | 0.017 | 0.020 | **0.024** | 0.025 | 0.028 | 0.029 | 0.029 |
+
+**Cara membaca:**
+- Dari N = 1 ke N = 4, HR naik ±50% (0.032 → 0.049). Ini fase **cold**: setiap interaksi tambahan sangat membantu.
+- Setelah N ≈ 4, kurva hampir **datar** (0.05–0.06). User sudah **warm**, dan interaksi tambahan hanya sedikit menambah akurasi.
+- Bentuk ini sama dengan Figure 4 paper (ItemKNN ML-1M: ±0.049 di N = 1, datar di ±0.06).
+- Grafik: `results/user_based_ml1m.png`.
+
+**Catatan jujur:**
+- Confidence interval antar N saling tumpang tindih, karena user test hanya 1.180. Jadi angka "4" sebaiknya dibaca sebagai "sekitar 4", sama seperti paper yang menulis ± 1.4.
+- Hasil ini bergantung pada pilihan filter seen dengan riwayat **lengkap** (§7). Tanpa pilihan itu, kurvanya datar di ±0.025 dan threshold-nya tidak bermakna.
+
+### 8.2 Item-Based: threshold tidak ditemukan ❌
+- Skalanya sama dengan paper: **1000 item**, **95.812 titik evaluasi** (successive), selesai dalam 25 menit.
+- Hasilnya, HR\*@K dan NDCG\*@K = **0 untuk semua N ≤ 64 dan semua K (1–100)**. Di N = 64, **0 dari 509 item** pernah masuk top-100 satu kali pun.
+- Akibatnya kurvanya datar di 0 dan sliding window tidak menemukan threshold. Paper mendapat **9 ± 1.8**.
+
+**Ini bukan bug:**
+- Perhitungan cepatnya sudah diuji sama dengan latih ulang sungguhan.
+- Item yang memakai seluruh interaksinya memang direkomendasikan. Contoh: film terpopuler (2.243 interaksi) masuk top-100 di 99.5% titik evaluasi, dan film ke-300 terpopuler (475 interaksi) di 25%.
+
+**Penyebabnya: ItemKNN kita sangat bias ke item populer.**
+- Skor sebuah film = **jumlah** similarity-nya dengan ±150–200 film di riwayat user.
+- Film dengan sedikit penonton hanya mirip dengan sedikit film, jadi jumlah skornya selalu kalah dari film populer yang mirip dengan hampir semua film.
+- Uji tambahan: film dengan 177 interaksi penuh pun tidak pernah masuk top-100. Film ke-300 terpopuler baru mulai muncul (HR\*@100 = 0.001) setelah punya **256** interaksi.
+- Artinya, bagi ItemKNN kita, transisi cold → warm untuk item berada di **ratusan** interaksi, bukan sekitar 9.
+- EASE^R yang diuji sekilas berperilaku sama: 0 untuk N ≤ 32.
+
+**Kenapa berbeda dengan paper?** Kemungkinan besar varian ItemKNN di paper berbeda, misalnya ada normalisasi atau pembobotan yang mengurangi dominasi item populer. Detail ini tidak tertulis dan kodenya tidak bisa diakses (§7).
+
+**Pelajaran untuk presentasi:** hasil ini justru **mendukung** pesan utama paper, yaitu bahwa threshold tidak bisa diambil dari angka umum dan harus diukur ulang untuk setiap dataset **dan model**. Model yang sama-sama bernama "ItemKNN" bisa punya threshold item yang sangat berbeda (±9 vs ratusan).
+
+### 8.3 Status & rencana lanjutan
+| Hal | Status |
+|---|---|
+| User-Based ItemKNN & EASE^R | ✅ selesai, cocok dengan paper |
+| Item-Based ItemKNN, N ≤ 64 | ✅ selesai, threshold tidak ditemukan (penjelasan di atas) |
+| Item-Based dengan N diperluas (128, 256, 512) untuk mencari di mana ItemKNN kita mulai warm | ⏳ belum dijalankan (usulan) |
+| Menyamakan filter seen di notebook 01 dengan notebook 02 (riwayat lengkap) | ✅ selesai. Riwayat U6 diganti jadi [A, F, B] → ground truth D supaya kurva toy tetap naik (NDCG@2 0.315 → 0.815 → 1). Angka di §5 sudah diperbarui; **slide contoh hitung perlu disesuaikan** |

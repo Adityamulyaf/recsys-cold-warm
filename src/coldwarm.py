@@ -149,14 +149,20 @@ def history_matrix(histories: list[list[int]], n_items: int) -> sp.csr_matrix:
 
 
 def recommend(model, histories: list[list[int]], n_items: int, K: int = 10,
-              filter_seen: bool = True, batch: int = 2048) -> np.ndarray:
-    """Top-K rekomendasi (indeks item, urut skor menurun) untuk tiap riwayat."""
+              filter_seen: bool = True, exclude: list[list[int]] | None = None,
+              batch: int = 2048) -> np.ndarray:
+    """Top-K rekomendasi (indeks item, urut skor menurun) untuk tiap riwayat.
+
+    `exclude`: item yang dibuang dari kandidat per user. Defaultnya = riwayat itu
+    sendiri. Di User-Based kita isi dengan riwayat LENGKAP user (lihat user_based_curve).
+    """
     out = np.empty((len(histories), K), dtype=np.int64)
     for s in range(0, len(histories), batch):
         hb = histories[s:s + batch]
         scores = model.score(history_matrix(hb, n_items))
         if filter_seen:
-            for r, h in enumerate(hb):
+            eb = hb if exclude is None else exclude[s:s + batch]
+            for r, h in enumerate(eb):
                 scores[r, h] = -np.inf
         if K >= n_items:
             top = np.tile(np.arange(n_items), (len(hb), 1))[:, :K]
@@ -212,12 +218,20 @@ def tune(model_cls, grid: list[dict], X, split: Split, n_items: int, K: int = 10
 
 # --------------------------------------------------------------------------- user-based
 def user_based_curve(model, split: Split, n_items: int, Ns=DEFAULT_NS, K: int = 10,
-                     seed: int = 0) -> pd.DataFrame:
+                     seed: int = 0, n_repeats: int = 1,
+                     filter_full_history: bool = False) -> pd.DataFrame:
     """Analisis User-Based (Sec 3.2).
 
     Model sudah dilatih dan tidak diubah. Untuk tiap N dan tiap user test dengan
     |L(u)| >= N: ambil N interaksi secara uniform dari riwayatnya, urutkan sesuai
     waktu, beri rekomendasi, lalu bandingkan dengan interaksi PERTAMA setelah GT.
+
+    n_repeats: sampling diulang beberapa kali per user, lalu metrik per user
+        dirata-rata. Ini mengurangi noise akibat satu kali sampling acak.
+    filter_full_history: True = item di riwayat LENGKAP user dibuang dari kandidat
+        (bukan hanya N item sampel). Paper tidak merinci ini (Sec 4.2 hanya bilang
+        hasil konsisten dengan/tanpa "filter seen"). Tanpa ini, slot top-K terisi
+        film yang sudah pernah ditonton dan HR turun jauh di bawah nilai paper.
     """
     rng = np.random.default_rng(seed)
     users = list(split.test_hist)
@@ -226,13 +240,18 @@ def user_based_curve(model, split: Split, n_items: int, Ns=DEFAULT_NS, K: int = 
         sel = [u for u in users if len(split.test_hist[u]) >= N]
         if len(sel) < 2:
             break
-        hists = []
-        for u in sel:
-            L = split.test_hist[u]
-            idx = np.sort(rng.choice(len(L), size=N, replace=False))  # urutan waktu tetap terjaga
-            hists.append([L[j] for j in idx])
         gts = [split.test_holdout[u][0] for u in sel]
-        hit, ndcg = hit_ndcg(recommend(model, hists, n_items, K), gts)
+        exclude = [split.test_hist[u] for u in sel] if filter_full_history else None
+        hit, ndcg = np.zeros(len(sel)), np.zeros(len(sel))
+        for _ in range(n_repeats):
+            hists = []
+            for u in sel:
+                L = split.test_hist[u]
+                idx = np.sort(rng.choice(len(L), size=N, replace=False))  # urutan waktu tetap terjaga
+                hists.append([L[j] for j in idx])
+            h, n = hit_ndcg(recommend(model, hists, n_items, K, exclude=exclude), gts)
+            hit += h / n_repeats
+            ndcg += n / n_repeats
         rows.append(dict(N=N, n_users=len(sel), HR=hit.mean(), HR_ci=ci95(hit),
                          NDCG=ndcg.mean(), NDCG_ci=ci95(ndcg)))
     return pd.DataFrame(rows)
@@ -293,6 +312,127 @@ def item_based_curve(model_factory, split: Split, n_users: int, n_items: int,
         if verbose:
             print(f"[{c}/{len(items)}] item {item} (|M|={len(M)}) selesai")
     return pd.DataFrame(rows)
+
+
+class ItemBasedItemKNN:
+    """Item-Based skala penuh untuk ItemKNN TANPA pruning (k=None).
+
+    Kenapa bisa cepat tapi tetap eksak (setara dengan melatih ulang):
+    - Membuang interaksi item i hanya mengubah baris/kolom i dari G = XᵀX, dan
+      norma item lain tidak berubah. Jadi sim(h, j) untuk h, j ≠ i tetap sama.
+    - Item i dibuang dari semua riwayat test, sehingga baris i tidak pernah dipakai.
+      Skor item lain (j ≠ i) TIDAK bergantung pada N.
+    - Yang berubah terhadap N hanya kolom i: sim(h, i) = G'[h,i] / (‖h‖·√N + shrink),
+      dengan G'[h,i] = jumlah dari N user tersisa yang juga berinteraksi dengan h.
+    Jadi untuk tiap (i, N) cukup menghitung skor item i, lalu membandingkannya
+    dengan daftar skor tertinggi item lain yang sudah dihitung sekali.
+    Dengan cara ini setup paper bisa dijalankan penuh: S = 1000 item, semua user test,
+    semua langkah successive evaluation.
+    `split` harus dibuat dengan include_test_history_in_train=False.
+    """
+
+    def __init__(self, split: Split, n_users: int, n_items: int, shrink: float = 0.0,
+                 Ks=(1, 5, 10, 50, 100)):
+        self.split, self.n_items, self.shrink, self.Ks = split, n_items, shrink, tuple(Ks)
+        self.Kp1 = max(Ks) + 1
+        self.X = to_matrix(split.train, n_users, n_items).tocsc()
+        self.S = ItemKNN(k=None, shrink=shrink).fit(self.X.tocsr()).S
+        self.norms = np.sqrt(np.asarray(self.X.sum(axis=0)).ravel())
+        self.users = list(split.test_hist)
+        self.base = [split.test_hist[u] for u in self.users]
+        self.hold = [split.test_holdout[u] for u in self.users]
+        # Satu baris evaluasi per (user, t): riwayat = base + hold[:t]
+        lens = np.array([len(h) for h in self.hold])
+        self.row_user = np.repeat(np.arange(len(self.users)), lens)
+        self.start = np.concatenate([[0], np.cumsum(lens)[:-1]])
+        self.hold_flat = np.concatenate([np.asarray(h, dtype=np.int64) for h in self.hold])
+        self.B = history_matrix(self.base, n_items)
+        tops = [self._user_rows(b, h) for b, h in zip(self.base, self.hold)]
+        self.topv = np.vstack([t[0] for t in tops])
+        self.topi = np.vstack([t[1] for t in tops])
+        self.contains = {}
+        for k, (b, h) in enumerate(zip(self.base, self.hold)):
+            for it in set(b) | set(h):
+                self.contains.setdefault(it, []).append(k)
+
+    def _user_rows(self, base, hold, drop=None):
+        """Top-(Kmax+1) skor item lain per langkah successive evaluation satu user."""
+        if drop is not None:
+            base = [x for x in base if x != drop]
+            hold = [x for x in hold if x != drop]
+        T = len(hold)
+        v = self.S[base].sum(axis=0) if base else np.zeros(self.n_items, np.float32)
+        steps = np.vstack([np.zeros((1, self.n_items), np.float32),
+                           np.cumsum(self.S[hold[:-1]], axis=0)]) if T > 1 else np.zeros((T, self.n_items), np.float32)
+        M = v[None, :] + steps[:T]
+        if base:
+            M[:, base] = -np.inf
+        for j, it in enumerate(hold[:-1]):        # item holdout ke-j sudah "dilihat" di langkah > j
+            M[j + 1:, it] = -np.inf
+        if drop is not None:
+            M[:, drop] = -np.inf
+        top = np.argpartition(-M, self.Kp1, axis=1)[:, :self.Kp1]
+        return np.take_along_axis(M, top, axis=1), top, base, hold
+
+    def column(self, item: int, keep_users) -> np.ndarray:
+        """Kolom similarity sim(·, i) setelah item i hanya punya interaksi dari keep_users."""
+        N = len(keep_users)
+        co = np.asarray(self.X[keep_users].sum(axis=0)).ravel()   # G'[h, i]
+        col = co / (self.norms * np.sqrt(N) + self.shrink + 1e-12)
+        col[item] = 0.0
+        return col
+
+    def prepare(self, item: int):
+        """Bagian yang tidak bergantung pada N: daftar skor item lain tanpa item i."""
+        aff = set(self.contains.get(item, []))
+        mask = ~np.isin(self.row_user, list(aff))
+        O = np.where(self.topi[mask] == item, -np.inf, self.topv[mask])
+        aff_rows = [self._user_rows(self.base[k], self.hold[k], drop=item) for k in sorted(aff)]
+        if aff_rows:
+            O = np.vstack([O] + [r[0] for r in aff_rows])
+        return dict(mask=mask, O=O, aff=[(r[2], r[3]) for r in aff_rows])
+
+    def ranks(self, prep, col: np.ndarray) -> np.ndarray:
+        """Peringkat item i di setiap baris evaluasi (inf kalau di luar top-Kmax)."""
+        ce = np.concatenate([[0.0], np.cumsum(col[self.hold_flat])])
+        r = np.arange(len(self.row_user))
+        score = (self.B @ col)[self.row_user] + ce[r] - ce[self.start[self.row_user]]
+        parts = [score[prep["mask"]]]
+        for base, hold in prep["aff"]:
+            b = col[base].sum() if base else 0.0
+            parts.append(b + np.concatenate([[0.0], np.cumsum(col[hold])])[:len(hold)])
+        score = np.concatenate(parts)
+        # Skor seri dihitung pesimis: item i berada di bawah item lain yang skornya sama.
+        rank = 1 + (prep["O"] >= score[:, None]).sum(axis=1)
+        return np.where(rank <= max(self.Ks), rank, np.inf)
+
+    def metrics(self, rank: np.ndarray) -> dict:
+        out = {}
+        for K in self.Ks:
+            hit = rank <= K
+            out[f"HR*@{K}"] = float(hit.mean())
+            out[f"NDCG*@{K}"] = float(np.where(hit, 1.0 / np.log2(np.where(hit, rank, 1) + 1), 0.0).mean())
+        return out
+
+    def curve(self, Ns=DEFAULT_NS, n_items_sample: int = 1000, seed: int = 0,
+              verbose: bool = True) -> pd.DataFrame:
+        rng = np.random.default_rng(seed)
+        train = self.split.train
+        pool = np.unique(train["i"].values)
+        items = rng.choice(pool, size=min(n_items_sample, len(pool)), replace=False)
+        rows = []
+        for c, item in enumerate(items, 1):
+            M_users = train.loc[train["i"].values == item, "u"].values      # M(i)
+            prep = self.prepare(item)
+            for N in Ns:
+                if N > len(M_users):
+                    break
+                keep = rng.choice(M_users, size=N, replace=False)
+                rows.append(dict(item=int(item), N=N, n_train=len(M_users),
+                                 **self.metrics(self.ranks(prep, self.column(item, keep)))))
+            if verbose and c % 100 == 0:
+                print(f"[{c}/{len(items)}] item selesai")
+        return pd.DataFrame(rows)
 
 
 def aggregate_item_based(df: pd.DataFrame) -> pd.DataFrame:
