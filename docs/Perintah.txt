@@ -1,0 +1,5 @@
+Berikut deskripsi yang harus dipresentasikan:
+1. Ambil salah satu metode/framework pada paper yang sudah dipresentasikan (sangat disarankan untuk memilih proposed method yang ada di paper).
+2. Berikan contoh input, preprocessing jika ada, perhitungan metode dan hasil output (berupa rekomendasi) yang dihasilkan,
+3. Evaluasi terhadap hasil rekomendasi yang digunakan dan contoh perhitungannya.
+4. Setiap kelompok diberi waktu 20-50 menit untuk menjelas keseluruhan proses tersebut dalam presentasi.
