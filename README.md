@@ -30,7 +30,7 @@ Bagian Item-Based di notebook 02 butuh ±35 menit. Set `RUN_ITEM_BASED = False` 
 | Split | Global timepoint kuantil 0.9; train/valid dibagi acak per user | sama |
 | Tuning | 20 titik acak dari grid, di set validasi | grid kecil penuh (NDCG@10 validasi) |
 | User-Based | model tetap; riwayat di-sample N secara uniform lalu diurutkan waktu; GT = interaksi pertama setelah GT; HR@10/NDCG@10; rata-rata atas user dengan ≥ N interaksi | sama; sampling diulang 5×; film di riwayat **lengkap** dibuang dari kandidat (**asumsi**, paper tidak merinci) |
-| Item-Based | N interaksi acak item *i* + latih ulang; user test dikeluarkan dari train; item *i* dibuang dari test/valid; successive evaluation; HR\*/NDCG\* (Eq. 1–4); S = 1000 item | sama (S = 1000), ItemKNN tanpa pruning; latih ulang dihitung eksak lewat pembaruan satu kolom similarity (`ItemBasedItemKNN`) |
+| Item-Based | N interaksi acak item *i* + latih ulang; user test dikeluarkan dari train; item *i* dibuang dari test/valid; successive evaluation; HR\*/NDCG\* (Eq. 1–4); S = 1000 item; N sampai 64 | sama (S = 1000), ItemKNN tanpa pruning; latih ulang dihitung eksak lewat pembaruan satu kolom similarity (`ItemBasedItemKNN`); grid N **diperluas sampai 512** karena di N ≤ 64 semua metrik masih 0 |
 | Threshold | sliding window least squares, slope positif tercuram | sama; **asumsi**: lebar window 3 titik, threshold = N terakhir di window itu (paper tidak menyebutkan keduanya) |
 | Model | EASE^R, PureSVD, ItemKNN, SASRec-CE | ItemKNN, EASE^R |
 

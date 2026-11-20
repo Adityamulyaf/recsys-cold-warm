@@ -424,6 +424,26 @@ Nilai HR@10 ItemKNN untuk beberapa N (rata-rata 5× sampling, ± = 95% CI):
 - Artinya, bagi ItemKNN kita, transisi cold → warm untuk item berada di **ratusan** interaksi, bukan sekitar 9.
 - EASE^R yang diuji sekilas berperilaku sama: 0 untuk N ≤ 32.
 
+**Lanjutan: grid N diperluas sampai 512.** Untuk melihat di mana item mulai warm, ditambahkan N = 96, 128, 192, 256, 384, 512 (run yang sama, 1000 item, 24.6 menit):
+
+| N | Item yang dirata-rata | HR\*@100 | NDCG\*@100 | HR\*@10 | Item yang pernah masuk top-100 |
+|---|---|---|---|---|---|
+| ≤ 64 | 1000 → 509 | 0 | 0 | 0 | 0 |
+| 96 | 408 | 0.00000005 | 0.00000001 | 0 | 2 |
+| 128 | 337 | 0.00002 | 0.000003 | 0 | 12 |
+| 192 | 232 | 0.0016 | 0.0003 | 0 | 54 |
+| 256 | 179 | 0.0077 | 0.0013 | 0.00002 | 93 |
+| 384 | 111 | 0.046 | 0.0079 | 0.0002 | 93 |
+| 512 | 64 | 0.170 | 0.031 | 0.0052 | 61 dari 64 |
+
+Cara membaca:
+- Item baru **mulai** muncul di rekomendasi sekitar N ≈ 100–200 interaksi.
+- Sliding window memilih **N = 512** (untuk NDCG\*@10, @50, @100), karena slope tercuram ada di window terakhir.
+- Tetapi 512 adalah **ujung grid** dan kurvanya **belum datar**, jadi angka 512 bukan threshold yang sah. Yang bisa disimpulkan hanya: threshold item untuk ItemKNN kita **di atas ±400 interaksi**, jauh dari 9 ± 1.8 di paper.
+- Kalau grid dibatasi seperti paper (N ≤ 64), threshold tetap **tidak ditemukan**.
+- Hati-hati membaca N besar: Eq. 3–4 hanya merata-rata item yang punya ≥ N interaksi. Di N = 512 tinggal 64 item, semuanya film populer. Sebagian kenaikan kurva berasal dari perubahan kelompok item ini, bukan hanya dari bertambahnya N.
+- Grafik: `results/item_based_ml1m.png` (sumbu N skala log2, garis abu-abu = batas grid paper di N = 64).
+
 **Kenapa berbeda dengan paper?** Kemungkinan besar varian ItemKNN di paper berbeda, misalnya ada normalisasi atau pembobotan yang mengurangi dominasi item populer. Detail ini tidak tertulis dan kodenya tidak bisa diakses (§7).
 
 **Pelajaran untuk presentasi:** hasil ini justru **mendukung** pesan utama paper, yaitu bahwa threshold tidak bisa diambil dari angka umum dan harus diukur ulang untuk setiap dataset **dan model**. Model yang sama-sama bernama "ItemKNN" bisa punya threshold item yang sangat berbeda (±9 vs ratusan).
@@ -433,5 +453,5 @@ Nilai HR@10 ItemKNN untuk beberapa N (rata-rata 5× sampling, ± = 95% CI):
 |---|---|
 | User-Based ItemKNN & EASE^R | ✅ selesai, cocok dengan paper |
 | Item-Based ItemKNN, N ≤ 64 | ✅ selesai, threshold tidak ditemukan (penjelasan di atas) |
-| Item-Based dengan N diperluas (128, 256, 512) untuk mencari di mana ItemKNN kita mulai warm | ⏳ belum dijalankan (usulan) |
+| Item-Based dengan N diperluas (96–512) untuk mencari di mana ItemKNN kita mulai warm | ✅ selesai. Item mulai muncul di N ≈ 100–200; kurva belum datar di N = 512, jadi threshold > ±400 (tabel di atas) |
 | Menyamakan filter seen di notebook 01 dengan notebook 02 (riwayat lengkap) | ✅ selesai. Riwayat U6 diganti jadi [A, F, B] → ground truth D supaya kurva toy tetap naik (NDCG@2 0.315 → 0.815 → 1). Angka di §5 sudah diperbarui; **slide contoh hitung perlu disesuaikan** |

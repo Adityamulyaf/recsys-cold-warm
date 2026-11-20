@@ -1,8 +1,8 @@
 setup,model,metrik,hasil,paper
-User-Based,ItemKNN,HR,4.0,4 +- 1.4
-User-Based,ItemKNN,NDCG,4.0,4 +- 1.4
-User-Based,EASE^R,HR,4.0,5 +- 1.1
-User-Based,EASE^R,NDCG,5.0,5 +- 1.1
-Item-Based,ItemKNN,NDCG*@10,,9 +- 1.8
-Item-Based,ItemKNN,NDCG*@50,,9 +- 1.8
-Item-Based,ItemKNN,NDCG*@100,,9 +- 1.8
+User-Based,ItemKNN,HR,4,4 +- 1.4
+User-Based,ItemKNN,NDCG,4,4 +- 1.4
+User-Based,EASE^R,HR,4,5 +- 1.1
+User-Based,EASE^R,NDCG,5,5 +- 1.1
+Item-Based,ItemKNN,NDCG*@10,512,9 +- 1.8
+Item-Based,ItemKNN,NDCG*@50,512,9 +- 1.8
+Item-Based,ItemKNN,NDCG*@100,512,9 +- 1.8
